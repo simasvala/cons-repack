@@ -1,0 +1,89 @@
+create or replace view PROD_GSC_DB.RETURNS.CV_R_TRANSF_ORD_ITEM(
+	SOURCE COMMENT 'Indicates the source system, always CP',
+	PLANT COMMENT 'Plant identifier where the transfer order is executed',
+	WH COMMENT 'Warehouse number identifying the specific warehouse complex',
+	SLOC COMMENT 'Storage location identifier',
+	"TO" COMMENT 'Transfer Order number',
+	TO_LN COMMENT 'Transfer Order Line number',
+	FROM_STORAGE_TYPE COMMENT 'Source storage type from which material is being moved',
+	SOURCE_BIN COMMENT 'Source storage bin location',
+	"ORDER" COMMENT 'Order number extracted from source bin',
+	MATERIAL COMMENT 'Material identifier',
+	BATCH COMMENT 'Batch or serial number of the material',
+	USER COMMENT 'User who processed the transfer order',
+	DEST_STORAGE_TYPE COMMENT 'Destination storage type where material is being moved to',
+	DESTINATION_BIN COMMENT 'Destination storage bin location',
+	DEST_QTY COMMENT 'Quantity moved to destination location',
+	MATERIAL_KEY COMMENT 'Unique identifier for the material',
+	PLANT_MATERIAL_KEY COMMENT 'Composite key combining plant and material',
+	PLANT_ORDER_MATERIAL_KEY COMMENT 'Composite key combining plant, order and material',
+	GOSC_UPD_TS COMMENT 'Timestamp of last update'
+) COMMENT='{\"CREATED_DT\": \"2026-03-02\", \"AUTHOR\": \"VALAS2\", \"DATA_STEWARD\": \"VALAS2\", \"PEER_REVIEWED_BY\": \"BODICM2\", \"DESCRIPTION\": \"Repack-related dataset for Returns dashboard integration\", \"REQUESTED_BY\": \"86000\", \"MIRO\": \"https://miro.com/app/board/uXjVG4lGNE4=/\", \"TARGET_DATAFLOW\": \"GOSC DF WS01.[FACT] Customer Returns\"}'
+ as 
+    
+    SELECT 
+            
+              DISTINCT 
+              'CP' "SOURCE" 
+            , LTAP.WERKS AS "PLANT" 
+            , LTAP.LGNUM AS "WH" 
+            , LTAP.LGORT AS "SLOC" 
+            , LTAK.TANUM AS "TO" 
+            , LTAP.TAPOS AS "TO_LN"
+            , LTAP.VLTYP AS "FROM STORAGE TYPE" 
+            , LTAP.VLPLA AS "SOURCE BIN" 
+            , SUBSTR( LTAP.VLPLA, -9,9) AS "ORDER" 
+            , LTAP.MATNR AS "MATERIAL" 
+            , LTAP.CHARG AS "BATCH / SERIAL" 
+            , LTAP.QNAME AS "USER" 
+            , LTAP.NLTYP AS "DEST STORAGE TYPE" 
+            , LTAP.NLPLA AS "DESTINATION BIN" 
+            , LTAP.NISTA AS "DEST QTY" 
+            , PLANT.MATL_KEY AS "MATERIAL KEY" 
+            , LTAP.WERKS || ' - ' || PLANT.MATL_KEY AS "PLANT MATERIAL KEY" 
+            , LTAP.WERKS || ' - ' || SUBSTR( LTAP.VLPLA, -9,9)  || ' - ' || PLANT.MATL_KEY AS "PLANT ORDER MATERIAL KEY" 
+            , CURRENT_TIMESTAMP "GOSC_UPD_TS" 
+            
+        FROM PROD_CDH_DB.SDS_MAIN.SDS_CP_LTAK LTAK 
+        INNER JOIN PROD_CDH_DB.SDS_MAIN.SDS_CP_LTAP LTAP 
+            ON LTAK.MANDT = LTAP.MANDT 
+            AND LTAK.LGNUM = LTAP.LGNUM 
+            AND LTAK.TANUM = LTAP.TANUM 
+        INNER JOIN PROD_CDH_DB.GLBL_MAIN.G_MATL_PLANT PLANT 
+            ON LTAP.WERKS = PLANT.PLANT_ID 
+            AND LTAP.MATNR = PLANT.MATL_ID 
+        INNER JOIN ( SELECT * FROM PROD_GSC_DB.RETURNS.CV_R_DIM_CALENDAR WHERE SCOPE = 'P') CAL 
+            ON LTAK.QDATU = CAL.CAL_DT 
+        WHERE
+            ( 
+                /* LTAP.LGNUM: Identifies the specific warehouse (or warehouse complex) to which the transfer order item belongs. 
+                In SAP WM (and also in EWM), a warehouse number is the highest organizational level in warehouse management */ 
+                LTAP.LGNUM IN ('102', '271', '272') 
+                /* LTAP.WERKS: identifier for a specific manufacturing or storage facility in your SAP landscape). In warehouse operations, 
+                it links the transfer order item to the correct plant, ensuring inventory movements are tracked at the appropriate organizational level */
+                OR LTAP.WERKS IN (
+                -- EMEA: 
+                '1030', '1341', '1680', '1711', '1720', 'Z030', 'Z040', 
+                -- US before 2025-11-12: 
+                '1361', '1367', '1878', '1879', '1880', '1881', '1872', '1873', '1874', '1663', 
+                -- US after 2025-11-12: 
+                'Z884','Z602','Z313','Z301','Z186','Z142','Z139','Z137','1887','1885','1883',
+                '1881','1880','1879','1878','1877', '1874','1873','1872','1871','1687','1663',
+                '1662','1639','1602','1441','1367','1313','1302','1301','1188','1142','1140',
+                '1139','1138','1137','1133','1125','1124','1108','1032','1031','1027')
+            )
+            AND 
+            (
+            /* LTAP.VLTYP: Source Storage Type. It tells you from which storage type the material is being taken 
+            during the execution of the transfer order item. */
+            LTAP.VLTYP = '901' 
+            /* LTAK.KQUIT: indicator for TO confirmation. It flags whether the transfer order has been confirmed 
+            (i.e., the physical movement of goods has been verified and completed by warehouse staff) */ 
+            AND 
+            LTAK.KQUIT IS NOT NULL 
+            /* LTAP.NISTA: quantity that was actually picked, put away, or moved during the confirmation of the transfer order item */
+            AND 
+            LTAP.NISTA > 0 
+            /* Adding additional plants to cover more regions */
+            --LTAP.WERKS
+            ) ;
