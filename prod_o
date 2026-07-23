@@ -1,0 +1,95 @@
+create or replace view PROD_GSC_DB.RETURNS.CV_R_PROD_ORD_ITEM(
+	SOURCE COMMENT 'Source system identifier',
+	PLANT COMMENT 'Plant identifier',
+	"ORDER" COMMENT 'Production order number',
+	ORDER_ITEM COMMENT 'Line item number within the production order',
+	FROM_STORAGE_BIN COMMENT 'Storage bin location identifier',
+	PRODUCTION_VERSION COMMENT 'Version number of the production order',
+	SPECIAL_PROCUREMENT_TYPE COMMENT 'Special procurement type indicator',
+	ACTUAL_DELIVERY_DATE COMMENT 'Actual date of delivery',
+	ORDER_QTY COMMENT 'Quantity ordered',
+	RECEIPT_QTY COMMENT 'Quantity received',
+	SCRAP_QTY COMMENT 'Quantity scrapped',
+	MATERIAL COMMENT 'Material number',
+	MATERIAL_KEY COMMENT 'Unique identifier for material',
+	LBM_PRICE_USD COMMENT 'Price in USD for LBM',
+	CONVERSION_FACTOR COMMENT 'Factor used for unit conversion',
+	STD_COST_SUOM COMMENT 'Standard cost in sales unit of measure',
+	SUOM COMMENT 'Sales unit of measure',
+	RECEIPT_COST_SUOM COMMENT 'Receipt cost in sales unit of measure',
+	GOODS_RECEIPT COMMENT 'Goods receipt indicator',
+	DELIVERY_COMPLETE COMMENT 'Delivery completion status',
+	ORDER_TYPE COMMENT 'Type of production order',
+	ORDER_CATEGORY COMMENT 'Category of production order',
+	CURRENT_FY COMMENT 'Current fiscal year',
+	PREVIOUS_FY COMMENT 'Previous fiscal year',
+	PRICE_UNIT COMMENT 'Price unit',
+	STD_PRICE COMMENT 'Standard price',
+	PRICE_UNIT_PREVIOUS_YEAR COMMENT 'Price unit from previous year',
+	STANDARD_PRICE_PREVIOUS_FY COMMENT 'Standard price from previous fiscal year',
+	PLANT_MATERIAL_KEY COMMENT 'Composite key of plant and material',
+	PLANT_ORDER_MATERIAL_KEY COMMENT 'Composite key of plant, order and material',
+	GOSC_UPD_TS COMMENT 'Timestamp of last run'
+) COMMENT='{\"CREATED_DT\": \"2026-03-02\", \"AUTHOR\": \"VALAS2\", \"DATA_STEWARD\": \"VALAS2\", \"PEER_REVIEWED_BY\": \"BODICM2\", \"DESCRIPTION\": \"Repack-related dataset for Returns dashboard integration\", \"REQUESTED_BY\": \"86000\", \"MIRO\": \"https://miro.com/app/board/uXjVG4lGNE4=/\", \"TARGET_DATAFLOW\": \"GOSC DF WS01.[FACT] Customer Returns\"}'
+ as 
+SELECT 
+        DISTINCT 
+        'CP' "SOURCE",
+        AFPO.DWERK "PLANT", 
+        AFPO.AUFNR "ORDER", 
+        AFPO.POSNR "ORDER ITEM", 
+        SUBSTR(AFPO.AUFNR,-9,9) "FROM STORAGE BIN",
+        AFPO.VERID "PRODUCTION VERSION", 
+        AFPO.PSOBS "SPECIAL PROCUREMENT TYPE", 
+        AFPO.LTRMI "ACTUAL DELIVERY DATE", 
+        AFPO.PSMNG "ORDER QTY", 
+        AFPO.WEMNG "RECEIPT QTY", 
+        AFPO.PSAMG "SCRAP QTY", 
+        AFPO.MATNR "MATERIAL", 
+        PLANT.MATL_KEY "MATERIAL KEY", 
+        LBM_PRICE_USD "LBM PRICE USD", 
+        CONV_FACTOR "CONVERSION FACTOR", 
+        ROUND( VAL.LBM_PRICE_USD * SUOM.CONV_FACTOR, 4) "STD COST (SUOM)", 
+        TRIM(SELL_UOM_CD) "SUOM",
+        ROUND( AFPO.WEMNG * VAL.LBM_PRICE_USD * SUOM.CONV_FACTOR, 2) "RECEIPT COST (SUOM)",
+        AFPO.WEPOS "GOODS RECEIPT", 
+        AFPO.ELIKZ "DELIVERY COMPLETE", 
+        AFPO.DAUAT "ORDER TYPE", 
+        AFPO.DAUTY "ORDER CATEGORY",
+        MBEW.PDATL "CURRENT FY", 
+        MBEW.PDATV "PREVIOUS FY", 
+        MBEW.PEINH "PRICE UNIT", 
+        MBEW.STPRS "STD PRICE", 
+        MBEW.VJPEI "PRICE UNIT PREVIOUS YEAR", 
+        VJSTP "STANDARD PRICE PREVIOUS FY",
+        AFPO.DWERK || ' - ' || PLANT.MATL_KEY "PLANT MATERIAL KEY",
+        AFPO.DWERK || ' - ' || SUBSTR(AFPO.AUFNR,-9,9) || ' - ' || PLANT.MATL_KEY "PLANT ORDER MATERIAL KEY",
+        SYSDATE() "GOSC_UPD_TS"
+
+    FROM PROD_CDH_DB.SDS_MAIN.SDS_CP_AFPO AFPO 
+    INNER JOIN PROD_CDH_DB.GLBL_MAIN.G_MATL_PLANT PLANT 
+        ON AFPO.DWERK = PLANT.PLANT_ID 
+        AND AFPO.MATNR = PLANT.MATL_ID 
+        AND PLANT.MATL_TYP IN ('ZFRT', 'HALB', 'ZHWA', 'ZUFG')
+    LEFT JOIN PROD_CDH_DB.GLBL_MAIN.G_MATL_UOM SUOM 
+        ON PLANT.MATL_KEY = SUOM.MATL_KEY 
+        AND TRIM(PLANT.SELL_UOM_CD) = TRIM(SUOM.UOM_CD)
+    LEFT JOIN PROD_CDH_DB.SDS_MAIN.SDS_CP_MBEW MBEW 
+        ON AFPO.DWERK = MBEW.BWKEY 
+        AND AFPO.MATNR = MBEW.MATNR 
+    LEFT JOIN PROD_CDH_DB.GLBL_MAIN.GRA_MATL_VAL VAL 
+        ON VAL.VAL_AREA_ID = PLANT.PLANT_ID 
+        AND VAL.MATL_KEY = PLANT.MATL_KEY 
+    INNER JOIN ( SELECT * FROM PROD_GSC_DB.RETURNS.CV_R_DIM_CALENDAR WHERE SCOPE = 'P') CAL 
+        ON AFPO.LTRMI = CAL.CAL_DT 
+    WHERE 
+        AFPO.DWERK IN ('1030', '1031', '1367', '1602', '1662', '1663', '1878', '1879', '1880', '1881') 
+        AND AFPO.VERID IN ('PV01', 'PV02', 'PV03');
+
+;
+
+
+--DROP view PROD_GSC_DB.RETURNS.CV_REPACK_LOOKUP;
+;
+
+;
